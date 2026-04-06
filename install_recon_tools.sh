@@ -1,43 +1,48 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
 #  External Pentest Tooling — Kali Linux Installer
+#  Client: Agilysys Stay 2 | Operator: bl4ck / A-LIGN
+# ─────────────────────────────────────────────────────────────
+#
+#  FIX: removed set -e so a single failed command never silently
+#  kills the script. Every function handles its own errors.
 # ─────────────────────────────────────────────────────────────
 
 set -uo pipefail
- 
+
 RED='\033[0;31m'
 GRN='\033[0;32m'
 YLW='\033[1;33m'
 BLU='\033[0;34m'
 GRY='\033[0;90m'
 NC='\033[0m'
- 
+
 GOBIN="/usr/local/go/bin"
 GOPATH_BIN="$HOME/go/bin"
 LOG_FILE="/tmp/recon_install.log"
- 
+
 pass() { echo -e "${GRN}[+]${NC} $1"; }
 fail() { echo -e "${RED}[!]${NC} $1"; }
 info() { echo -e "${BLU}[*]${NC} $1"; }
 warn() { echo -e "${YLW}[~]${NC} $1"; }
 step() { echo -e "\n${GRY}────────────────────────────────────────${NC}"; echo -e "${BLU}[>]${NC} $1"; }
- 
+
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         fail "Run as root: sudo bash $0"
         exit 1
     fi
 }
- 
+
 banner() {
     echo -e "${BLU}"
     echo "  ╔═══════════════════════════════════════════╗"
     echo "  ║   External Pentest Tooling — Kali Setup   ║"
-    echo "  ║           bl4cksku11 / ZeroTrust          ║"
+    echo "  ║         bl4ck / A-LIGN / ZeroTrust        ║"
     echo "  ╚═══════════════════════════════════════════╝"
     echo -e "${NC}"
 }
- 
+
 setup_go() {
     step "Checking Go installation"
     if command -v go &>/dev/null; then
@@ -45,7 +50,7 @@ setup_go() {
         pass "Go already installed: $GO_VER"
         return
     fi
- 
+
     info "Installing Go..."
     GO_VERSION="1.22.3"
     if wget -q "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -O /tmp/go.tar.gz; then
@@ -61,11 +66,11 @@ setup_go() {
         warn "Go download failed — check your internet connection"
     fi
 }
- 
+
 install_apt_tools() {
     step "Installing apt packages"
     apt-get update -qq 2>>"$LOG_FILE"
- 
+
     APT_TOOLS=(
         nmap
         curl
@@ -82,7 +87,7 @@ install_apt_tools() {
         build-essential
         pipx
     )
- 
+
     for tool in "${APT_TOOLS[@]}"; do
         if dpkg -s "$tool" &>/dev/null; then
             pass "$tool already installed"
@@ -96,17 +101,17 @@ install_apt_tools() {
         fi
     done
 }
- 
+
 go_install() {
     local name=$1
     local pkg=$2
     export PATH=$PATH:$GOBIN:$GOPATH_BIN
- 
+
     if command -v "$name" &>/dev/null; then
         pass "$name already installed"
         return
     fi
- 
+
     info "Installing $name..."
     if GOPATH="$HOME/go" go install "$pkg" 2>>"$LOG_FILE"; then
         if [[ -f "$GOPATH_BIN/$name" ]]; then
@@ -117,11 +122,11 @@ go_install() {
         warn "$name failed — check $LOG_FILE"
     fi
 }
- 
+
 install_go_tools() {
     step "Installing Go-based tools"
     export PATH=$PATH:$GOBIN:$GOPATH_BIN
- 
+
     go_install "subfinder" "github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"
     go_install "httpx"     "github.com/projectdiscovery/httpx/cmd/httpx@latest"
     go_install "dnsx"      "github.com/projectdiscovery/dnsx/cmd/dnsx@latest"
@@ -130,7 +135,7 @@ install_go_tools() {
     go_install "ffuf"      "github.com/ffuf/ffuf/v2@latest"
     go_install "amass"     "github.com/owasp-amass/amass/v4/...@master"
 }
- 
+
 install_trufflehog() {
     step "Installing TruffleHog"
     if command -v trufflehog &>/dev/null; then
@@ -145,7 +150,7 @@ install_trufflehog() {
         warn "trufflehog failed — check $LOG_FILE"
     fi
 }
- 
+
 install_gitleaks() {
     step "Installing Gitleaks"
     if command -v gitleaks &>/dev/null; then
@@ -167,23 +172,24 @@ install_gitleaks() {
         warn "gitleaks download failed — check $LOG_FILE"
     fi
 }
- 
+
 install_cloud_tools() {
     step "Installing cloud enumeration tools"
- 
+
     # ── cloud_enum ──────────────────────────────────────────
-    if command -v cloud_enum &>/dev/null || [[ -f /opt/recon-tools/cloud_enum/cloud_enum.py ]]; then
+    # Strict check: wrapper must exist AND be executable AND python script must be present
+    if [[ -x /usr/local/bin/cloud_enum && -f /opt/recon-tools/cloud_enum/cloud_enum.py ]]; then
         pass "cloud_enum already installed"
     else
         info "Installing cloud_enum..."
         mkdir -p /opt/recon-tools
         rm -rf /opt/recon-tools/cloud_enum  # clean any partial clone
- 
+
         if git clone -q https://github.com/initstring/cloud_enum.git /opt/recon-tools/cloud_enum 2>>"$LOG_FILE"; then
             # Try pip with --break-system-packages first (needed on Kali / Debian 12+)
             if pip3 install -q --break-system-packages \
                 -r /opt/recon-tools/cloud_enum/requirements.txt 2>>"$LOG_FILE"; then
- 
+
                 # Write a bash wrapper — more reliable than symlinking a .py file
                 cat > /usr/local/bin/cloud_enum << 'WRAPPER'
 #!/usr/bin/env bash
@@ -205,7 +211,7 @@ WRAPPER
             warn "cloud_enum git clone failed — check $LOG_FILE"
         fi
     fi
- 
+
     # ── s3scanner ───────────────────────────────────────────
     if command -v s3scanner &>/dev/null; then
         pass "s3scanner already installed"
@@ -225,7 +231,7 @@ WRAPPER
         fi
     fi
 }
- 
+
 update_nuclei_templates() {
     step "Updating Nuclei templates"
     if command -v nuclei &>/dev/null; then
@@ -239,11 +245,11 @@ update_nuclei_templates() {
         warn "Nuclei not found — skipping template update"
     fi
 }
- 
+
 verify_tools() {
     step "Verifying installations"
     echo ""
- 
+
     TOOLS=(
         nmap
         httpx
@@ -261,7 +267,7 @@ verify_tools() {
         jq
         whois
     )
- 
+
     ALL_OK=true
     for tool in "${TOOLS[@]}"; do
         if command -v "$tool" &>/dev/null; then
@@ -272,7 +278,7 @@ verify_tools() {
             ALL_OK=false
         fi
     done
- 
+
     echo ""
     if $ALL_OK; then
         pass "All tools installed successfully"
@@ -281,7 +287,7 @@ verify_tools() {
         warn "Re-run the script or install missing tools manually"
     fi
 }
- 
+
 path_reminder() {
     step "PATH setup"
     info "Add this to your ~/.bashrc or ~/.zshrc if Go tools aren't found after reboot:"
@@ -291,14 +297,14 @@ path_reminder() {
     info "Apply immediately without reboot:"
     echo -e "  ${GRY}source /etc/profile.d/go.sh${NC}"
 }
- 
+
 # ─── MAIN ───────────────────────────────────────────────────
- 
+
 banner
 check_root
- 
+
 : > "$LOG_FILE"
- 
+
 install_apt_tools
 setup_go
 install_go_tools
@@ -308,7 +314,7 @@ install_cloud_tools
 update_nuclei_templates
 verify_tools
 path_reminder
- 
+
 echo ""
 pass "Done. Full log at $LOG_FILE"
 echo ""
